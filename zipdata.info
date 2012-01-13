@@ -1,0 +1,3 @@
+name = "Zip Data"
+description = "Provides interface for zip-codes.com data and an API to calculate distance between zip codes"
+core = 7.x

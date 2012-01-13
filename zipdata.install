@@ -1,0 +1,79 @@
+<?php
+/**
+ * @file
+ * Install file for the zip_data module.
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function zipdata_schema() {
+  $schema['cache_zipdata_radius'] = drupal_get_schema_unprocessed('system', 'cache');
+  $schema['cache_zipdata_radius']['description'] = 'Cache table for the Zip Data module to store processed zipcode radius results.';
+
+  $schema['zipdata'] = array(
+    'description' => 'The core zip data information.',
+    'fields' => array(
+      'zeid' => array(
+        'description' => 'Zip Code entry id.',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'zipcode' => array(
+        'description' => 'The zip code.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'city' => array(
+        'description' => 'The city of this entry.',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'county' => array(
+        'description' => 'The county of this entry.',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'state' => array(
+        'description' => 'The state of this entry.',
+        'type' => 'varchar',
+        'length' => 2,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'latitude' => array(
+        'description' => 'Zip code latitude.',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'longitude' => array(
+        'description' => 'Zip code longitude.',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+    ),
+    'indexes' => array(
+      'zipcode'           => array('zipcode'),
+      'zd_city_state'     => array('city', 'state'),
+      'zd_county_state'   => array('county', 'state'),
+      'zd_state_city'     => array('state', 'city'),
+      'zd_state_county'   => array('state', 'county'),
+      'zd_latitude'       => array('longitude'),
+      'zd_longitude'      => array('longitude'),
+    ),
+    'primary key' => array('zeid'),
+  );
+
+  return $schema;
+}

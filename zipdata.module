@@ -1,0 +1,174 @@
+<?php
+/**
+ * This module provides access to Zip Code data
+ * as deliverd via CSV file by http://www.zip-codes.com/
+ */
+
+/**
+ * Implements hook_permission().
+ */
+function zipdata_permission() {
+  return array(
+    'import zipdata' => array(
+      'title' => t('Import Zipcode Data'),
+      'description' => t('Perform zipcode import from CSV file.'),
+    ),
+    'access zipdata examples' => array(
+      'title' => t('Access Zipcode Data Examples'),
+      'description' => t('Can view and run zip code examples for demo or testing purposes.'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function zipdata_menu() {
+  $items['admin/config/zipdata'] = array(
+    'title' => 'Zip Data Cache',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('zipdata_clear_cache'),
+    'access arguments' => array('import zipdata'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'zipdata.admin.inc'
+  );
+  $items['admin/config/zipdata/import'] = array(
+    'title' => 'Zip Data Import',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('zipdata_import'),
+    'access arguments' => array('import zipdata'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'zipdata.admin.inc'
+  );
+  $items['zipdata/zipcodes/autocomplete'] = array(
+    'page callback' => '_zipdata_zipcodes_autocomplete',
+    'access arguments' => array('access content'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  return $items;
+}
+
+/**
+ * Returns the geo data for the given zipcode and distance.
+ *
+ * @param mixed $zipcode This can be the zipcode or city.
+ * @param int $distance
+ * @param string $unit use m for miles, km for kilometers
+ * @return array
+ */
+function zipdata_query_radius($zipcode, $distance = 10, $unit = 'm', $reset_cache = FALSE) {
+  // validate input
+  if (!is_numeric($zipcode) || !is_numeric($distance)) {
+    return array();
+  }
+  // sanitize units and default to miles if input is invalid
+  $unit = $unit == 'km' ? 'km' : 'm';
+  // set cache id
+  $cid = $zipcode .'|'. $distance .'|'. $unit;
+  // returned cached results if $reset_cache isn't requested
+  if (!$reset_cache && $cache = cache_get($cid, 'cache_zipdata_radius')) {
+    $_zipcodes = $cache->data;
+    return $_zipcodes;
+  }
+
+  $_zipcodes = array();
+  // read in lat/long data
+  $result = db_query("SELECT latitude, longitude FROM {zipdata} WHERE zipcode = :zipcode LIMIT 1", array(':zipcode' => $zipcode));
+  if ($record = $result->fetchAssoc()) {
+    $num = $result->rowCount();
+    $perlat = $unit == 'm' ? 69.09 : 111.19;
+
+    $sql = "SELECT zipcode, truncate((degrees(acos(sin(radians(latitude)) * sin(radians(".$record['latitude'].")) + cos(radians(latitude)) * cos(radians(".$record['latitude'].")) * cos(radians(longitude-".$record['longitude']."))))*". $perlat ."),1) as distance FROM {zipdata} HAVING distance <= ". $distance;
+    $result = db_query($sql);
+
+    $num = $result->rowCount();
+    $_zipcodes = $result->fetchAll();
+  }
+  // set cache
+  cache_set($cid, $_zipcodes, 'cache_zipdata_radius');
+
+  return $_zipcodes;
+}
+
+/**
+ * Returns a zipcode object with latitude, longitude, cities, counties, & states
+ */
+function zipdata_zipcode_load($zipcode) {
+  static $_zipdata_zipcodes;
+  if (isset($_zipdata_zipcodes) && isset($zipdata_zipcodes[$zipcode])) {
+    return $zipdata_zipcodes[$zipcode];
+  }
+  // init object
+  $_zipdata_zipcodes[$zipcode] = new stdClass();
+  $_zipdata_zipcodes[$zipcode]->cities = array();
+  $_zipdata_zipcodes[$zipcode]->counties = array();
+  $_zipdata_zipcodes[$zipcode]->states = array();
+  // query for data
+  $result = db_query("SELECT city, county, state, latitude, longitude FROM {zipdata} WHERE zipcode = :zipcode", array(':zipcode' => $zipcode));
+  foreach ($result as $row) {
+    $_zipdata_zipcodes[$zipcode]->latitude = $row->latitude;
+    $_zipdata_zipcodes[$zipcode]->longitude = $row->longitude;
+    $_zipdata_zipcodes[$zipcode]->cities[$row->city] = $row->city;
+    $_zipdata_zipcodes[$zipcode]->counties[$row->county] = $row->county;
+    $_zipdata_zipcodes[$zipcode]->states[$row->state] = $row->state;
+  }
+  // return object
+  return $_zipdata_zipcodes[$zipcode];
+}
+
+/**
+ * Returns an array of cities from the given zip code.
+ *
+ * @param int $zipcode
+ * @return array An array of city names.
+ */
+function zipdata_get_cities($zipcode) {
+  $result = db_query("SELECT city FROM {zipdata} WHERE zipcode = :zipcode", array(':zipcode' => $zipcode));
+  return $result->fetchCol();
+}
+
+/**
+ * Returns an array of counties from the given zip code.
+ *
+ * @param int $zipcode
+ * @return array An array of county names.
+ */
+function zipdata_get_counties($zipcode) {
+  $result = db_query("SELECT city FROM {zipdata} WHERE zipcode = :zipcode", array(':zipcode' => $zipcode));
+  return $result->fetchCol();
+}
+
+/**
+ * Returns an array of states from a zip code.
+ *
+ * @param int $zipcode
+ * @return array Array of state codes.
+ */
+function zipdata_get_states($zipcode) {
+  $result = db_query("SELECT state FROM {zipdata} WHERE zipcode = :zipcode", array(':zipcode' => $zipcode));
+  return $result->fetchCol();
+}
+
+/**
+ * Autocomplete callback for zip codes
+ */
+function _zipdata_zipcodes_autocomplete($string) {
+  $matches = array();
+
+  // Some fantasy DB table which holds cities
+  $query = db_select('zipdata', 'zd');
+  // Select rows that match the string
+  $return = $query
+    ->fields('zd', array('zipcode'))
+    ->condition('zd.zipcode', db_like($string) .'%', 'LIKE')
+    ->range(0, 10)
+    ->execute();
+
+  // add matches to $matches
+  foreach ($return as $row) {
+    $matches[$row->zipcode] = $row->zipcode;
+  }
+
+  // return for JS
+  drupal_json_output($matches);
+}
